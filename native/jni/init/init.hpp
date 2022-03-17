@@ -22,25 +22,11 @@ struct BootConfig {
     void print();
 };
 
-struct fstab_entry {
-    std::string dev;
-    std::string mnt_point;
-    std::string type;
-    std::string mnt_flags;
-    std::string fsmgr_flags;
-
-    fstab_entry() = default;
-    fstab_entry(const fstab_entry &) = delete;
-    fstab_entry(fstab_entry &&) = default;
-    fstab_entry &operator=(const fstab_entry&) = delete;
-    fstab_entry &operator=(fstab_entry&&) = default;
-};
-
-#define INIT_SOCKET "MAGISKINIT"
 #define DEFAULT_DT_DIR "/proc/device-tree/firmware/android"
 
 extern std::vector<std::string> mount_list;
 
+int magisk_proxy_main(int argc, char *argv[]);
 bool unxz(int fd, const uint8_t *buf, size_t size);
 void load_kernel_info(BootConfig *config);
 bool check_two_stage();
@@ -57,7 +43,6 @@ protected:
     char **argv = nullptr;
 
     [[noreturn]] void exec_init();
-    void read_dt_fstab(std::vector<fstab_entry> &fstab);
 public:
     BaseInit(char *argv[], BootConfig *config = nullptr) : config(config), argv(argv) {}
     virtual ~BaseInit() = default;
@@ -65,6 +50,8 @@ public:
 };
 
 class MagiskInit : public BaseInit {
+private:
+    void mount_rules_dir();
 protected:
     mmap_data self;
     mmap_data magisk_cfg;
@@ -75,14 +62,13 @@ protected:
     // running magiskinit on legacy SAR AVD emulator
     bool avd_hack = false;
 #else
-    // Make it const so compiler can optimize hacks out of the code
-    static const bool avd_hack = false;
+    // Make it constexpr so compiler can optimize hacks out of the code
+    static constexpr bool avd_hack = false;
 #endif
 
-    void mount_with_dt();
-    bool patch_sepolicy(const char *file);
+    void patch_sepolicy(const char *file);
+    void hijack_sepolicy();
     void setup_tmp(const char *path);
-    void mount_rules_dir(const char *dev_base, const char *mnt_base);
     void patch_rw_root();
 public:
     using BaseInit::BaseInit;
@@ -94,7 +80,6 @@ protected:
 
     void backup_files();
     void patch_ro_root();
-    void mount_system_root();
 public:
     using MagiskInit::MagiskInit;
 };
@@ -140,14 +125,14 @@ public:
 
 class LegacySARInit : public SARBase {
 private:
-    bool early_mount();
+    bool mount_system_root();
     void first_stage_prep();
 public:
     LegacySARInit(char *argv[], BootConfig *config) : SARBase(argv, config) {
         LOGD("%s\n", __FUNCTION__);
     };
     void start() override {
-        if (early_mount())
+        if (mount_system_root())
             first_stage_prep();
         else
             patch_ro_root();
@@ -161,22 +146,14 @@ public:
 
 class RootFSInit : public MagiskInit {
 private:
-    void early_mount();
+    void prepare();
 public:
     RootFSInit(char *argv[], BootConfig *config) : MagiskInit(argv, config) {
         LOGD("%s\n", __FUNCTION__);
     }
     void start() override {
-        early_mount();
+        prepare();
         patch_rw_root();
         exec_init();
     }
-};
-
-class MagiskProxy : public MagiskInit {
-public:
-    explicit MagiskProxy(char *argv[]) : MagiskInit(argv) {
-        LOGD("%s\n", __FUNCTION__);
-    }
-    void start() override;
 };
