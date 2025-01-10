@@ -3,6 +3,7 @@ package com.topjohnwu.magisk;
 import static android.os.Build.VERSION.SDK_INT;
 import static android.os.ParcelFileDescriptor.MODE_READ_ONLY;
 
+import android.annotation.TargetApi;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
@@ -19,9 +20,6 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 import java.util.Map;
 
-import io.michaelrocks.paranoid.Obfuscate;
-
-@Obfuscate
 public class StubApk {
     private static File dynDir;
     private static Method addAssetPath;
@@ -57,12 +55,24 @@ public class StubApk {
         return new File(getDynDir(info), "update.apk");
     }
 
+    @TargetApi(Build.VERSION_CODES.R)
+    private static ResourcesLoader getResourcesLoader(File path) throws IOException {
+        var loader = new ResourcesLoader();
+        ResourcesProvider provider;
+        if (path.isDirectory()) {
+            provider = ResourcesProvider.loadFromDirectory(path.getPath(), null);
+        } else {
+            var fd = ParcelFileDescriptor.open(path, MODE_READ_ONLY);
+            provider = ResourcesProvider.loadFromApk(fd);
+        }
+        loader.addProvider(provider);
+        return loader;
+    }
+
     public static void addAssetPath(Resources res, String path) {
         if (SDK_INT >= Build.VERSION_CODES.R) {
-            try (var fd = ParcelFileDescriptor.open(new File(path), MODE_READ_ONLY)) {
-                var loader = new ResourcesLoader();
-                loader.addProvider(ResourcesProvider.loadFromApk(fd));
-                res.addLoaders(loader);
+            try {
+                res.addLoaders(getResourcesLoader(new File(path)));
             } catch (IOException ignored) {}
         } else {
             AssetManager asset = res.getAssets();
