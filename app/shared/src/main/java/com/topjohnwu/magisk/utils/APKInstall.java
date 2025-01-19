@@ -25,9 +25,6 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-import io.michaelrocks.paranoid.Obfuscate;
-
-@Obfuscate
 public final class APKInstall {
 
     public static void transfer(InputStream in, OutputStream out) throws IOException {
@@ -70,8 +67,6 @@ public final class APKInstall {
     public interface Session {
         // @WorkerThread
         OutputStream openStream(Context context) throws IOException;
-        // @WorkerThread
-        void install(Context context, File apk) throws IOException;
         // @WorkerThread @Nullable
         Intent waitIntent();
     }
@@ -104,27 +99,28 @@ public final class APKInstall {
             } else if (sessionId.equals(intent.getAction())) {
                 int status = intent.getIntExtra(EXTRA_STATUS, STATUS_FAILURE_INVALID);
                 switch (status) {
-                    case STATUS_PENDING_USER_ACTION:
-                        userAction = intent.getParcelableExtra(Intent.EXTRA_INTENT);
-                        break;
-                    case STATUS_SUCCESS:
+                    case STATUS_PENDING_USER_ACTION ->
+                            userAction = intent.getParcelableExtra(Intent.EXTRA_INTENT);
+                    case STATUS_SUCCESS -> {
                         if (packageName == null) {
                             onSuccess(context);
                         }
-                        break;
-                    default:
+                    }
+                    default -> {
                         int id = intent.getIntExtra(EXTRA_SESSION_ID, 0);
-                        if (id > 0) {
-                            var installer = context.getPackageManager().getPackageInstaller();
-                            var info = installer.getSessionInfo(id);
-                            if (info != null) {
-                                installer.abandonSession(info.getSessionId());
-                            }
+                        var installer = context.getPackageManager().getPackageInstaller();
+                        try {
+                            installer.abandonSession(id);
+                        } catch (SecurityException ignored) {
                         }
                         if (onFailure != null) {
                             onFailure.run();
                         }
-                        context.getApplicationContext().unregisterReceiver(this);
+                        try {
+                            context.getApplicationContext().unregisterReceiver(this);
+                        } catch (IllegalArgumentException ignored) {
+                        }
+                    }
                 }
                 latch.countDown();
             }
@@ -133,7 +129,10 @@ public final class APKInstall {
         private void onSuccess(Context context) {
             if (onSuccess != null)
                 onSuccess.run();
-            context.getApplicationContext().unregisterReceiver(this);
+            try {
+                context.getApplicationContext().unregisterReceiver(this);
+            } catch (IllegalArgumentException ignored) {
+            }
         }
 
         @Override
@@ -171,14 +170,6 @@ public final class APKInstall {
                     session.close();
                 }
             };
-        }
-
-        @Override
-        public void install(Context context, File apk) throws IOException {
-            try (var src = new FileInputStream(apk);
-                 var out = openStream(context)) {
-                transfer(src, out);
-            }
         }
     }
 }
